@@ -1,0 +1,11 @@
+name: pr-stub
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions: {}
+jobs:
+  stub:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "stub from base file, head=${{ github.event.pull_request.head.sha }}"
