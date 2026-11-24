@@ -1,0 +1,10 @@
+name: prt-control
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+permissions: {}
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo control, no checkout
