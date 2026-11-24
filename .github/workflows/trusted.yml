@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  id-token: write
+  issues: read
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -14,26 +14,25 @@ jobs:
       - name: Report workflow_run fields (no secrets, no checkout)
         env:
           WR: ${{ toJSON(github.event.workflow_run) }}
+          SENDER: ${{ github.event.sender.login }}
+          ACTOR: ${{ github.actor }}
+          TRIG: ${{ github.triggering_actor }}
         run: |
-          echo "$WR" | jq '{id, name, path, event, conclusion, head_branch, head_sha, run_attempt,
+          echo "$WR" | jq -c '{name, path, event, conclusion, head_branch, head_sha,
             head_repo: .head_repository.full_name, actor: .actor.login,
-            triggering_actor: .triggering_actor.login, prs: (.pull_requests | length)}'
-          echo "ref=${{ github.ref }} sha=${{ github.sha }}"
-          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then echo "OIDC_AVAILABLE=yes (not requested)"; else echo "OIDC_AVAILABLE=no"; fi
-      - name: Wait so the fork can force-push in between
-        run: sleep 90
-      - name: Resolve PR from API and compare head sha
+            triggering_actor: .triggering_actor.login, display_title, prs: (.pull_requests | length)}'
+          echo "sender=$SENDER github.actor=$ACTOR github.triggering_actor=$TRIG"
+      - name: Resolve PR (any state) by head sha from API
         env:
           GH_TOKEN: ${{ github.token }}
           OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           WR_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          gh api "repos/${{ github.repository }}/pulls?head=${OWNER}:${BRANCH}&state=open" \
-            --jq '.[] | {number, head_sha: .head.sha, author: .user.login, draft}' > prs.json
-          cat prs.json
-          n=$(jq -s length prs.json)
-          echo "open PRs found: $n"
-          if [ "$n" = 0 ]; then echo "RESULT=no-open-pr"; exit 0; fi
-          cur=$(jq -rs '.[0].head_sha' prs.json)
-          if [ "$cur" = "$WR_SHA" ]; then echo "RESULT=sha-match"; else echo "RESULT=sha-mismatch run=$WR_SHA now=$cur"; fi
+          gh api "repos/${{ github.repository }}/pulls?head=${OWNER}:${BRANCH}&state=all" \
+            --jq ".[] | select(.head.sha == \"$WR_SHA\") | {number, state, merged_at, author: .user.login, labels: [.labels[].name]}"
+          for n in $(gh api "repos/${{ github.repository }}/pulls?head=${OWNER}:${BRANCH}&state=all" --jq ".[] | select(.head.sha == \"$WR_SHA\" and .state == \"closed\") | .number"); do
+            echo "PR $n close events:"
+            gh api "repos/${{ github.repository }}/issues/$n/events" --jq '.[] | select(.event == "closed" or .event == "merged") | {event, actor: .actor.login, created_at}'
+            gh api "repos/${{ github.repository }}/pulls/$n" --jq '{merged, merged_by: .merged_by.login}'
+          done
